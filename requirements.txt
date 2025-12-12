@@ -1,0 +1,5 @@
+Flask
+requests
+pydantic
+uvicorn
+python-dotenv
