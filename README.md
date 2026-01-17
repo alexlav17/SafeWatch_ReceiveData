@@ -1,8 +1,4 @@
-# Projet par Alexandre Lavallée
-
-Co-auteurs :
-- SLIMANI Ryan
-- MOUJANE Choukry
+# Projet par Alexandre Lavallée SLIMANI Ryan MOUJANE Choukry
 
 ## Présentation
 
