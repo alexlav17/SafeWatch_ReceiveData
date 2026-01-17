@@ -1,203 +1,129 @@
-# ESP32 Multi-Capteurs Listener 🚀
+# Projet par Alexandre Lavallée
 
-Serveur Python pour recevoir et visualiser en temps réel les données de **deux capteurs ESP32** :
-- **BMA400** : Accéléromètre 3 axes
-- **MAX86150** : Capteur cardiaque (BPM, IR, ECG)
+Co-auteurs :
+- SLIMANI Ryan
+- MOUJANE Choukry
 
-Interface web temps réel avec graphiques interactifs, SSE (Server-Sent Events) et stockage SQLite.
+## Présentation
 
----
+Ce projet est un **serveur de réception et de visualisation en temps réel** pour des données envoyées par un **ESP32**.
 
-## ✨ Fonctionnalités
+Le serveur :
+- écoute des **paquets UDP** (port **3333**) contenant du **JSON**,
+- diffuse les mesures en **temps réel** vers une page Web (WebSocket / Socket.IO),
+- affiche un **ECG**, un **BPM** et l’**accéléromètre** (x/y/z),
+- peut enregistrer des fichiers CSV et des logs d’anomalies (fichiers générés à l’exécution).
 
-- 📡 **Réception UDP** des données ESP32 (port 3333)
-- 📊 **6 champs de données** : bpm, ir, ecg, x, y, z
-- 📈 **Graphiques temps réel** : Accéléromètre 3D + ECG sélectionnable
-- 💾 **Stockage SQLite** avec historique complet
-- 🔴 **Server-Sent Events (SSE)** pour mise à jour instantanée
-- 🎨 **Interface web responsive** avec Chart.js
+## Démarrage rapide
 
----
+### 1) Pré-requis
 
-## 📋 Prérequis
+- Python 3
+- pip
 
-- **Raspberry Pi** (ou Linux/macOS/Windows)
-- **Python 3.8+**
-- **ESP32** avec BMA400 + MAX86150
-- Réseau WiFi commun
+### 2) Installer
 
----
-
-## 🚀 Installation Rapide
-
-### 1. Cloner le projet
 ```bash
-git clone <repository-url>
-cd esp32-listener
-```
-
-### 2. Installer les dépendances
-```bash
+cd /home/pi/Documents/esp32-listener
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Migrer la base de données
-```bash
-python3 migrate_db.py
-```
+### 3) Lancer le serveur
 
-### 4. Vérifier le système
-```bash
-python3 check_system.py
-```
-Doit afficher **Score: 5/5** ✅
+Méthode recommandée :
 
-### 5. Démarrer le serveur
 ```bash
 python3 start_server.py
 ```
 
-### 6. Ouvrir l'interface web
+Ou directement :
+
+```bash
+python3 flask_app.py
 ```
-http://<IP-raspberry>:5000
+
+### 4) Ouvrir l’interface
+
+Dans un navigateur :
+
+```
+http://<IP_DU_RASPBERRY>:5000
 ```
 
----
+Trouver l’IP :
 
-## 📡 Configuration ESP32
+```bash
+hostname -I
+```
 
-Votre ESP32 doit envoyer un JSON UDP comme ceci :
+## Format des données attendues (ESP32 → UDP 3333)
+
+Le format recommandé est :
 
 ```json
 {
-  "bpm": 72.5,
-  "ir": 12450,
-  "ecg": 8920,
-  "x": 0.123,
-  "y": -0.456,
+  "timestamp": "2026-01-14T10:30:45.123Z",
+  "ecg": 2450,
+  "bpm": 72,
+  "x": 0.145,
+  "y": -0.023,
   "z": 0.987
 }
 ```
 
-**Configuration réseau dans votre code C :**
-```c
-#define WIFI_SSID      "VotreSSID"
-#define WIFI_PASS      "VotreMotDePasse"
-#define RASPBERRY_IP   "192.168.1.17"  // IP du Raspberry Pi
-#define UDP_PORT       3333
-```
+Notes :
+- `ecg` est la valeur brute (ADC) du signal ECG.
+- `bpm` est validé (plage typique 40–180). Si absent ou invalide, l’UI affichera `--`.
+- `x`, `y`, `z` sont l’accélération (souvent en g). Si absent, le serveur met 0.0.
+- `timestamp` est optionnel (généré automatiquement si absent).
 
----
+### Champs optionnels pour anomalies
 
-## 📁 Structure du projet
+Le serveur peut aussi recevoir des champs de classification d’anomalies envoyés par l’ESP32, par exemple :
 
-```
-esp32-listener/
-├── src/
-│   ├── main.py              # Application Flask principale
-│   ├── api/
-│   │   ├── routes.py        # Endpoints API REST
-│   │   └── realtime.py      # Gestionnaire SSE
-│   ├── models/
-│   │   └── sensor.py        # Modèle de données capteur
-│   ├── services/
-│   │   └── collector.py     # Collecteur de données
-│   ├── config.py            # Configuration
-│   ├── utils.py             # Utilitaires (validation, traitement)
-│   ├── ui.py                # Interface HTML/JS
-│   ├── receive.py           # Endpoint SSE
-│   └── udp_bridge.py        # Bridge UDP → SSE
-├── tests/
-│   └── test_main.py         # Tests unitaires
-├── migrate_db.py            # Migration base de données
-├── check_system.py          # Vérification système
-├── test_udp.py              # Test envoi UDP local
-├── start_server.py          # Démarrage serveur complet
-├── esp32_data.db            # Base SQLite (créée auto)
-├── requirements.txt         # Dépendances Python
-├── RECAP.md                 # Documentation complète
-└── README.md                # Ce fichier
-```
-
----
-
-## 🚀 Utilisation
-
-### Démarrage rapide
-```bash
-python3 start_server.py
-```
-
-Le serveur démarre sur `http://0.0.0.0:5000` et affiche :
-- L'adresse web de l'interface
-- L'IP/port pour la configuration ESP32
-- Les informations de connexion
-
-### Autres commandes utiles
-
-```bash
-# Vérifier le système
-python3 check_system.py
-
-# Tester localement (simule ESP32)
-python3 test_udp.py
-
-# Voir les dernières données
-sqlite3 esp32_data.db "SELECT * FROM sensor_data ORDER BY rowid DESC LIMIT 10;"
-```
-
----
-
-## 📊 Interface Web
-
-L'interface affiche en temps réel :
-
-1. **Carte d'information** : Device ID, Type, Timestamp, valeurs actuelles
-2. **Graphique Accéléromètre 3D** : Courbes X/Y/Z (200 points)
-3. **Graphique Cardiaque** : BPM/IR/ECG sélectionnable (500 points)
-4. **Tableaux historiques** : Accel + ECG
-
----
-
-## 🔧 API REST
-
-### POST `/api/sensor-data`
 ```json
 {
-  "id": "esp32-001",
-  "type": "ecg",
-  "bpm": 72.5,
-  "ir": 12450,
-  "ecg": 8920,
-  "x": 0.123,
-  "y": -0.456,
-  "z": 0.987
+  "anomaly_type": "FALL_CRITICAL",
+  "anomaly_severity": "CRITICAL",
+  "bpm": 50,
+  "bpm_valid": true,
+  "signal_valid": true,
+  "alert": true
 }
 ```
 
-### GET `/api/sensor-data/latest`
-Dernière mesure
+## Comment ça marche (simple)
 
-### GET `/events`
-Stream SSE temps réel
+1) Un thread UDP écoute `0.0.0.0:3333`.
+2) Chaque paquet JSON est parsé et normalisé (ECG/BPM/accel/timestamp).
+3) Les données sont diffusées à tous les navigateurs connectés via Socket.IO.
+4) Optionnel : écriture dans des fichiers CSV (session) et un log d’anomalies.
 
----
+## Structure (fichiers principaux)
 
-## 🐛 Dépannage
+- `flask_app.py` : application principale (UDP + Socket.IO + UI)
+- `start_server.py` : lance l’application principale
+- `templates/index.html` : page Web (UI)
+- `simulate_esp32.py` : simulateur d’envoi de données
+- `test_udp.py` / `test_udp_simple.py` : tests UDP basiques
+- `ESP32_EXEMPLE.ino` : exemple de sketch ESP32
 
-### Les données n'apparaissent pas
+## Tester sans ESP32
 
-1. **ESP32** : Vérifier les logs série (WiFi connecté + envoi UDP)
-2. **Serveur** : Vérifier les logs Python (réception UDP)
-3. **Navigateur** : Console F12 → "connected", "live"
-4. **Test local** : `python3 test_udp.py`
+1) Lancer le serveur
+2) Dans un autre terminal :
 
-### Erreur "Colonnes manquantes"
 ```bash
-python3 migrate_db.py
+python3 simulate_esp32.py
 ```
 
----
+## Dépannage rapide
+
+- Pas de page Web : vérifier le port 5000 et l’IP.
+- Pas de données : vérifier que l’ESP32 envoie bien en UDP sur le port 3333.
+- Port déjà utilisé : arrêter le processus qui écoute sur 5000.
 
 ## 📚 Documentation
 
