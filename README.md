@@ -1,85 +1,219 @@
-# ESP32 Listener — Guide en français
+# ESP32 Multi-Capteurs Listener 🚀
 
-Ce projet fournit un petit serveur Python pour recevoir des données (ex. accéléromètre) envoyées par un ESP32 (C3). Le service expose une API REST pour l'ingestion et le stockage des mesures.
+Serveur Python pour recevoir et visualiser en temps réel les données de **deux capteurs ESP32** :
+- **BMA400** : Accéléromètre 3 axes
+- **MAX86150** : Capteur cardiaque (BPM, IR, ECG)
 
-## Structure du projet
+Interface web temps réel avec graphiques interactifs, SSE (Server-Sent Events) et stockage SQLite.
+
+---
+
+## ✨ Fonctionnalités
+
+- 📡 **Réception UDP** des données ESP32 (port 3333)
+- 📊 **6 champs de données** : bpm, ir, ecg, x, y, z
+- 📈 **Graphiques temps réel** : Accéléromètre 3D + ECG sélectionnable
+- 💾 **Stockage SQLite** avec historique complet
+- 🔴 **Server-Sent Events (SSE)** pour mise à jour instantanée
+- 🎨 **Interface web responsive** avec Chart.js
+
+---
+
+## 📋 Prérequis
+
+- **Raspberry Pi** (ou Linux/macOS/Windows)
+- **Python 3.8+**
+- **ESP32** avec BMA400 + MAX86150
+- Réseau WiFi commun
+
+---
+
+## 🚀 Installation Rapide
+
+### 1. Cloner le projet
+```bash
+git clone <repository-url>
+cd esp32-listener
+```
+
+### 2. Installer les dépendances
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Migrer la base de données
+```bash
+python3 migrate_db.py
+```
+
+### 4. Vérifier le système
+```bash
+python3 check_system.py
+```
+Doit afficher **Score: 5/5** ✅
+
+### 5. Démarrer le serveur
+```bash
+python3 start_server.py
+```
+
+### 6. Ouvrir l'interface web
+```
+http://<IP-raspberry>:5000
+```
+
+---
+
+## 📡 Configuration ESP32
+
+Votre ESP32 doit envoyer un JSON UDP comme ceci :
+
+```json
+{
+  "bpm": 72.5,
+  "ir": 12450,
+  "ecg": 8920,
+  "x": 0.123,
+  "y": -0.456,
+  "z": 0.987
+}
+```
+
+**Configuration réseau dans votre code C :**
+```c
+#define WIFI_SSID      "VotreSSID"
+#define WIFI_PASS      "VotreMotDePasse"
+#define RASPBERRY_IP   "192.168.1.17"  // IP du Raspberry Pi
+#define UDP_PORT       3333
+```
+
+---
+
+## 📁 Structure du projet
 
 ```
-esp32-listener
-├── src
-│   ├── main.py                # Crée l'application Flask (ne démarre pas le serveur directement)
-│   ├── api
-│   │   ├── __init__.py        # Marque le répertoire api comme un package
-│   │   └── routes.py          # Définit les routes de l'API pour la réception des données
-│   ├── services
-│   │   └── collector.py        # Contient la classe Collector pour le traitement des données
-│   ├── models
-│   │   └── sensor.py          # Définit la classe Sensor pour les lectures des capteurs
-│   ├── config.py              # Paramètres de configuration pour l'application
-│   └── utils.py               # Fonctions utilitaires pour le traitement et la validation des données
-├── tests
-│   └── test_main.py           # Tests unitaires pour la logique principale de l'application
-├── requirements.txt           # Liste des dépendances du projet
-├── .env                       # Variables d'environnement pour la configuration
-├── .gitignore                 # Fichiers à ignorer par Git
-├── Dockerfile                 # Instructions pour la création d'une image Docker
-└── README.md                  # Documentation du projet
+esp32-listener/
+├── src/
+│   ├── main.py              # Application Flask principale
+│   ├── api/
+│   │   ├── routes.py        # Endpoints API REST
+│   │   └── realtime.py      # Gestionnaire SSE
+│   ├── models/
+│   │   └── sensor.py        # Modèle de données capteur
+│   ├── services/
+│   │   └── collector.py     # Collecteur de données
+│   ├── config.py            # Configuration
+│   ├── utils.py             # Utilitaires (validation, traitement)
+│   ├── ui.py                # Interface HTML/JS
+│   ├── receive.py           # Endpoint SSE
+│   └── udp_bridge.py        # Bridge UDP → SSE
+├── tests/
+│   └── test_main.py         # Tests unitaires
+├── migrate_db.py            # Migration base de données
+├── check_system.py          # Vérification système
+├── test_udp.py              # Test envoi UDP local
+├── start_server.py          # Démarrage serveur complet
+├── esp32_data.db            # Base SQLite (créée auto)
+├── requirements.txt         # Dépendances Python
+├── RECAP.md                 # Documentation complète
+└── README.md                # Ce fichier
 ```
 
-## Prérequis
+---
 
-- Python 3.8+ (sur Raspberry Pi / Linux)
-- pip
+## 🚀 Utilisation
 
-## Installation
+### Démarrage rapide
+```bash
+python3 start_server.py
+```
 
-1. Cloner le dépôt :
-   ```
-   git clone <repository-url>
-   cd esp32-listener
-   ```
+Le serveur démarre sur `http://0.0.0.0:5000` et affiche :
+- L'adresse web de l'interface
+- L'IP/port pour la configuration ESP32
+- Les informations de connexion
 
-2. Installer les dépendances requises :
-   ```
-   pip install -r requirements.txt
-   ```
+### Autres commandes utiles
 
-## Configuration
+```bash
+# Vérifier le système
+python3 check_system.py
 
-- Éditez `src/config.py` ou créez un fichier `.env` si vous préférez charger des variables d'environnement.
-- Paramètres utiles : `host`, `port`, `sensor_data_endpoint`.
+# Tester localement (simule ESP32)
+python3 test_udp.py
 
-## Lancer le serveur (réception des données)
+# Voir les dernières données
+sqlite3 esp32_data.db "SELECT * FROM sensor_data ORDER BY rowid DESC LIMIT 10;"
+```
 
-- Depuis le répertoire racine du projet :
-  ```
-  python3 receivemain.py
-  ```
-  Le serveur écoute sur l'adresse et le port définis dans `src/config.py` (par défaut `0.0.0.0:5000`).
+---
 
-## Usage
+## 📊 Interface Web
 
-Une fois le serveur en cours d'exécution, vous pouvez envoyer des requêtes aux routes API définies pour acquérir des données depuis l'ESP32 C3. Reportez-vous au fichier `src/api/routes.py` pour les points de terminaison disponibles et leur utilisation.
+L'interface affiche en temps réel :
 
-## Envoyer des données (test local)
+1. **Carte d'information** : Device ID, Type, Timestamp, valeurs actuelles
+2. **Graphique Accéléromètre 3D** : Courbes X/Y/Z (200 points)
+3. **Graphique Cardiaque** : BPM/IR/ECG sélectionnable (500 points)
+4. **Tableaux historiques** : Accel + ECG
 
-- Utilisez `sendmain.py` pour simuler un ESP32 :
-  ```
-  python3 sendmain.py
-  ```
-  Ce script envoie périodiquement des JSON au point de terminaison configuré.
+---
 
-### Exemple d'envoi depuis un ESP32 (Arduino/PlatformIO)
+## 🔧 API REST
 
-- Utiliser HTTP POST vers : `http://<IP_RPI>:5000/api/sensor-data`
-- Payload JSON attendu : `{ "id": "...", "type": "accelerometer", "x": <float>, "y": <float>, "z": <float> }`
+### POST `/api/sensor-data`
+```json
+{
+  "id": "esp32-001",
+  "type": "ecg",
+  "bpm": 72.5,
+  "ir": 12450,
+  "ecg": 8920,
+  "x": 0.123,
+  "y": -0.456,
+  "z": 0.987
+}
+```
 
-## Notes
+### GET `/api/sensor-data/latest`
+Dernière mesure
 
-- Les données reçues sont validées via `src/utils.py` et stockées dans une base SQLite (`esp32_data.db`) ou selon la logique définie dans `src/api/routes.py`.
-- `main.py` n'exécute pas le serveur directement afin de faciliter les tests et l'importation depuis d'autres scripts ; utilisez `receivemain.py` pour démarrer en local.
-- Pour la production, utilisez un serveur WSGI (gunicorn/uwsgi) derrière un reverse proxy.
+### GET `/events`
+Stream SSE temps réel
 
-## Contributing
+---
 
-Contributions are welcome! Please submit a pull request or open an issue for any enhancements or bug fixes.
+## 🐛 Dépannage
+
+### Les données n'apparaissent pas
+
+1. **ESP32** : Vérifier les logs série (WiFi connecté + envoi UDP)
+2. **Serveur** : Vérifier les logs Python (réception UDP)
+3. **Navigateur** : Console F12 → "connected", "live"
+4. **Test local** : `python3 test_udp.py`
+
+### Erreur "Colonnes manquantes"
+```bash
+python3 migrate_db.py
+```
+
+---
+
+## 📚 Documentation
+
+- **[RECAP.md](RECAP.md)** : Guide complet
+- **[MISE_A_JOUR.md](MISE_A_JOUR.md)** : Notes de mise à jour
+
+---
+
+## 🎉 Statut
+
+✅ **Système opérationnel**
+- ✅ 6 champs de données (bpm, ir, ecg, x, y, z)
+- ✅ Interface web temps réel
+- ✅ Bridge UDP actif
+- ✅ Base de données migrée
+
+**Score vérification : 5/5** ✨
+
+---

@@ -1,0 +1,2197 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Monitor - Temps Réel</title>
+    
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    
+    <!-- Chart.js Zoom Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .header h1 {
+            color: #667eea;
+            font-size: 28px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-bar {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .status-indicator.connected {
+            background: #10b981;
+            color: white;
+        }
+        
+        .status-indicator.disconnected {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: white;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .card h2 {
+            color: #667eea;
+            font-size: 20px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        /* Zone BPM */
+        .bpm-display {
+            text-align: center;
+            padding: 30px;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 20px;
+        }
+        
+        .bpm-value {
+            font-size: 72px;
+            font-weight: bold;
+            line-height: 1;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .bpm-label {
+            font-size: 18px;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .heart-icon {
+            font-size: 48px;
+            animation: heartbeat 1.5s infinite;
+        }
+        
+        @keyframes heartbeat {
+            0%, 100% { transform: scale(1); }
+            10% { transform: scale(1.1); }
+            20% { transform: scale(1); }
+        }
+        
+        /* Accéléromètre */
+        .accel-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .accel-bar {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .accel-bar-label {
+            display: flex;
+            justify-content: space-between;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .accel-bar-container {
+            height: 30px;
+            background: #f3f4f6;
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .accel-bar-fill {
+            height: 100%;
+            transition: width 0.1s ease;
+            border-radius: 15px;
+            position: relative;
+        }
+        
+        .accel-bar-fill.x { background: linear-gradient(90deg, #ef4444, #dc2626); }
+        .accel-bar-fill.y { background: linear-gradient(90deg, #10b981, #059669); }
+        .accel-bar-fill.z { background: linear-gradient(90deg, #3b82f6, #2563eb); }
+        
+        .accel-bar-zero {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #6b7280;
+        }
+        
+        /* ANOMALIES - Alerte visuelle */
+        .anomaly-alert {
+            display: none;
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            background: linear-gradient(135deg, #dc2626, #991b1b);
+            color: white;
+            padding: 20px 25px;
+            border-radius: 12px;
+            box-shadow: 0 8px 20px rgba(220, 38, 38, 0.4);
+            z-index: 10000;
+            animation: slideIn 0.3s ease;
+            min-width: 320px;
+            max-width: 400px;
+            border: 3px solid #fca5a5;
+        }
+        
+        .anomaly-alert.show {
+            display: block;
+        }
+        
+        /* Animation spéciale pour alertes CRITIQUES */
+        .anomaly-alert.critical {
+            animation: slideIn 0.3s ease, pulse-critical 1s ease infinite;
+            border: 4px solid #fee2e2;
+            box-shadow: 0 0 30px rgba(127, 29, 29, 0.8);
+        }
+        
+        @keyframes pulse-critical {
+            0%, 100% {
+                box-shadow: 0 0 30px rgba(127, 29, 29, 0.8);
+                transform: scale(1);
+            }
+            50% {
+                box-shadow: 0 0 50px rgba(127, 29, 29, 1);
+                transform: scale(1.02);
+            }
+        }
+        
+        .anomaly-alert-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .anomaly-alert-icon {
+            font-size: 24px;
+            animation: rotate 2s linear infinite;
+        }
+        
+        .anomaly-alert-body {
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .anomaly-alert-severity {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        
+        .severity-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        
+        .severity-critique {
+            background: #7f1d1d;
+            color: white;
+            border: 2px solid #991b1b;
+            box-shadow: 0 0 10px rgba(127, 29, 29, 0.5);
+            animation: pulse-critical 1.5s infinite;
+        }
+        
+        .severity-grave {
+            background: #dc2626;
+            color: white;
+            border: 2px solid #ef4444;
+        }
+        
+        .severity-modéré {
+            background: #f59e0b;
+            color: white;
+            border: 2px solid #fbbf24;
+        }
+        
+        @keyframes pulse-critical {
+            0%, 100% {
+                box-shadow: 0 0 10px rgba(127, 29, 29, 0.5);
+            }
+            50% {
+                box-shadow: 0 0 20px rgba(127, 29, 29, 0.9);
+            }
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                box-shadow: 0 8px 20px rgba(220, 38, 38, 0.4);
+            }
+            50% {
+                box-shadow: 0 8px 30px rgba(220, 38, 38, 0.8);
+            }
+        }
+        
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Dashboard anomalies */
+        .anomalies-dashboard {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .anomalies-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .anomaly-item {
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 5px solid #ef4444;
+            transition: all 0.2s;
+        }
+        
+        .anomaly-item:hover {
+            transform: translateX(3px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .anomaly-item.critique {
+            border-left-width: 6px;
+            border-left-color: #7f1d1d;
+            background: linear-gradient(to right, #fee2e2, #fef2f2);
+            box-shadow: 0 0 15px rgba(127, 29, 29, 0.2);
+        }
+        
+        .anomaly-item.grave {
+            border-left-width: 5px;
+            border-left-color: #dc2626;
+            background: linear-gradient(to right, #fef2f2, #fff);
+        }
+        
+        .anomaly-item.modéré {
+            border-left-width: 4px;
+            border-left-color: #f59e0b;
+            background: linear-gradient(to right, #fef3c7, #fffbeb);
+        }
+        
+        /* Onglets de classification */
+        .tab-btn {
+            padding: 10px 20px;
+            border: none;
+            background: #f3f4f6;
+            color: #6b7280;
+            cursor: pointer;
+            font-weight: 600;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .tab-btn:hover {
+            background: #e5e7eb;
+            color: #374151;
+        }
+        
+        .tab-btn.active {
+            background: white;
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+        
+        .anomaly-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .anomaly-time {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        
+        .anomaly-duration {
+            font-weight: bold;
+            color: #dc2626;
+        }
+        
+        /* Modal Visualisation Anomalie */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-overlay.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 1200px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .modal-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #1f2937;
+        }
+        
+        .modal-close {
+            font-size: 32px;
+            cursor: pointer;
+            color: #6b7280;
+            background: none;
+            border: none;
+            padding: 0;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+        
+        .modal-close:hover {
+            background: #f3f4f6;
+            color: #1f2937;
+        }
+        
+        .modal-charts {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+        
+        .modal-chart-container {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .modal-chart-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #374151;
+        }
+        
+        /* Boutons */
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .btn-view-anomaly {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        
+        .btn-view-anomaly:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+        }
+        
+        .btn-anomaly {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        
+        .btn-refresh {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn-refresh:hover {
+            background: #2563eb;
+        }
+        
+        .btn-clear {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-clear:hover {
+            background: #dc2626;
+        }
+        
+        .accel-bar-zero {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: rgba(0,0,0,0.2);
+        }
+        
+        /* Graphique */
+        .chart-container {
+            position: relative;
+            height: 300px;
+            cursor: default;
+        }
+        
+        .chart-container.ctrl-pressed {
+            cursor: grab;
+        }
+        
+        .chart-container.dragging {
+            cursor: grabbing;
+        }
+        
+        .chart-container canvas {
+            cursor: inherit;
+        }
+        
+        /* Contrôles */
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .btn-start {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-stop {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-secondary {
+            background: #6b7280;
+            color: white;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .recording-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 15px;
+            background: #ef4444;
+            color: white;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .recording-dot {
+            width: 10px;
+            height: 10px;
+            background: white;
+            border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+        
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        
+        .info-label {
+            color: #6b7280;
+            font-size: 14px;
+        }
+        
+        .info-value {
+            font-weight: 600;
+            color: #111827;
+            font-size: 14px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .bpm-value {
+                font-size: 56px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>
+                <span>📡</span>
+                ESP32 Monitor - Temps Réel
+            </h1>
+            <div class="status-bar">
+                <div id="connectionStatus" class="status-indicator disconnected">
+                    <div class="status-dot"></div>
+                    <span>Déconnecté</span>
+                </div>
+                <div class="info-item" style="border: none; padding: 0;">
+                    <span class="info-label">Paquets:</span>
+                    <span id="packetCount" class="info-value">0</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Alerte anomalie (cachée par défaut) -->
+        <div id="anomalyAlert" class="anomaly-alert">
+            <div class="anomaly-alert-header">
+                <span class="anomaly-alert-icon">🚨</span>
+                <span>ANOMALIE DÉTECTÉE</span>
+            </div>
+            <div class="anomaly-alert-body">
+                <div id="anomalyType"></div>
+                <div id="anomalyDetails"></div>
+                <div id="anomalySeverity"></div>
+            </div>
+        </div>
+        
+        <!-- Dashboard anomalies classées par gravité -->
+        <div class="anomalies-dashboard">
+            <h2>⚠️ Anomalies par Gravité</h2>
+            <div class="btn-group">
+                <button class="btn-anomaly btn-refresh" onclick="refreshAnomalies()">🔄 Actualiser</button>
+                <button class="btn-anomaly btn-clear" onclick="clearAnomalies()">🗑️ Effacer (avec backup)</button>
+            </div>
+            
+            <!-- Onglets par gravité -->
+            <div style="display: flex; gap: 10px; margin: 15px 0; border-bottom: 2px solid #e5e7eb;">
+                <button class="tab-btn active" onclick="showGravityTab('all')" id="tab-all">
+                    📊 Toutes (<span id="count-all">0</span>)
+                </button>
+                <button class="tab-btn" onclick="showGravityTab('critique')" id="tab-critique">
+                    🚨 Critiques (<span id="count-critique">0</span>)
+                </button>
+                <button class="tab-btn" onclick="showGravityTab('grave')" id="tab-grave">
+                    ⛔ Graves (<span id="count-grave">0</span>)
+                </button>
+                <button class="tab-btn" onclick="showGravityTab('modéré')" id="tab-modéré">
+                    ⚠️ Modérées (<span id="count-modéré">0</span>)
+                </button>
+            </div>
+            
+            <div id="anomaliesList" class="anomalies-list"></div>
+        </div>
+        
+        <!-- Modal Visualisation Anomalie -->
+        <div id="anomalyModal" class="modal-overlay" onclick="closeAnomalyModal(event)">
+            <div class="modal-content" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <div class="modal-title">📊 Visualisation de l'Anomalie</div>
+                    <button class="modal-close" onclick="closeAnomalyModal()">&times;</button>
+                </div>
+                <div id="anomalyModalInfo" style="margin-bottom: 20px; padding: 15px; background: #f3f4f6; border-radius: 8px;"></div>
+                <div class="modal-charts">
+                    <div class="modal-chart-container">
+                        <div class="modal-chart-title">📈 Signal ECG</div>
+                        <canvas id="modalEcgChart"></canvas>
+                    </div>
+                    <div class="modal-chart-container">
+                        <div class="modal-chart-title">🎯 Accéléromètre (X, Y, Z)</div>
+                        <canvas id="modalAccelChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Grid principale -->
+        <div class="grid">
+            <!-- Colonne gauche -->
+            <div>
+                <!-- BPM Card -->
+                <div class="card">
+                    <div class="bpm-display">
+                        <div class="heart-icon">❤️</div>
+                        <div class="bpm-value" id="bpmValue">--</div>
+                        <div class="bpm-label">BPM</div>
+                    </div>
+                    
+                    <h2>📊 Accéléromètre</h2>
+                    <div class="accel-bars">
+                        <div class="accel-bar">
+                            <div class="accel-bar-label">
+                                <span style="color: #ef4444;">● X</span>
+                                <span id="accelXValue">0.000 g</span>
+                            </div>
+                            <div class="accel-bar-container">
+                                <div class="accel-bar-zero"></div>
+                                <div id="accelXBar" class="accel-bar-fill x"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="accel-bar">
+                            <div class="accel-bar-label">
+                                <span style="color: #10b981;">● Y</span>
+                                <span id="accelYValue">0.000 g</span>
+                            </div>
+                            <div class="accel-bar-container">
+                                <div class="accel-bar-zero"></div>
+                                <div id="accelYBar" class="accel-bar-fill y"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="accel-bar">
+                            <div class="accel-bar-label">
+                                <span style="color: #3b82f6;">● Z</span>
+                                <span id="accelZValue">0.000 g</span>
+                            </div>
+                            <div class="accel-bar-container">
+                                <div class="accel-bar-zero"></div>
+                                <div id="accelZBar" class="accel-bar-fill z"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Statut Card -->
+                <div class="card" style="margin-top: 20px;">
+                    <h2>ℹ️ Statut</h2>
+                    <div class="info-item">
+                        <span class="info-label">📊 Échantillons:</span>
+                        <span id="totalSamples" class="info-value">0</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">⏱️ Durée session:</span>
+                        <span id="sessionDuration" class="info-value">0s</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Dernier paquet:</span>
+                        <span id="lastPacket" class="info-value">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">ECG:</span>
+                        <span id="ecgValue" class="info-value">--</span>
+                    </div>
+                    <div class="info-item" style="border: none;">
+                        <span class="info-label">UDP:</span>
+                        <span id="udpStatus" class="info-value">--</span>
+                    </div>
+                </div>
+                
+                <!-- Contrôles CSV -->
+                <div class="card" style="margin-top: 20px;">
+                    <h2>💾 Enregistrement CSV</h2>
+                    <div id="recordingStatus" style="margin-bottom: 15px; min-height: 30px;">
+                        <!-- Status will be inserted here -->
+                    </div>
+                    <div class="controls">
+                        <button id="startCsvBtn" class="btn-start" onclick="startCSV()">
+                            ▶️ Démarrer
+                        </button>
+                        <button id="stopCsvBtn" class="btn-stop" onclick="stopCSV()" disabled>
+                            ⏹️ Arrêter
+                        </button>
+                    </div>
+                    <div id="csvFilename" style="margin-top: 10px; font-size: 12px; color: #6b7280;"></div>
+                    <div class="controls" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
+                        <button class="btn-secondary" onclick="downloadData()">📥 Télécharger Données CSV</button>
+                        <button class="btn-secondary" onclick="downloadAnomalies()">⚠️ Télécharger Anomalies CSV</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Colonne droite -->
+            <div>
+                <!-- Graphique Signal ECG -->
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h2>📈 ECG - Signal Cardiaque (<span id="ecgTimeRange">30</span>s)</h2>
+                        <span id="ecgPosition" style="font-size: 13px; color: #667eea; font-weight: 600;">🔴 En direct</span>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="signalChart"></canvas>
+                    </div>
+                    <div class="controls">
+                        <button id="pauseEcgBtn" class="btn-secondary" onclick="togglePauseEcg()">⏸️ Pause</button>
+                        <button class="btn-secondary" onclick="resetZoomEcg()">🔍 Reset Zoom</button>
+                        <button id="extendEcgBtn" class="btn-secondary" onclick="toggleExtendEcg()">⏱️ 60s</button>
+                        <button class="btn-secondary" onclick="goToStart('ecg')">⏮️ Début</button>
+                        <button class="btn-secondary" onclick="goToLive('ecg')">🔴 Direct</button>
+                    </div>
+                    <div style="text-align: center; font-size: 12px; color: #6b7280; margin-top: 8px; padding: 8px; background: rgba(107, 114, 128, 0.1); border-radius: 8px;">
+                        🖱️ <strong>Glissez</strong> pour naviguer • <strong>Molette</strong> pour zoomer • Synchronisé avec Accéléromètre
+                    </div>
+                </div>
+                
+                <!-- Graphique Accéléromètre -->
+                <div class="card" style="margin-top: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h2>📊 Accéléromètre - Axes X, Y, Z (<span id="accelTimeRange">30</span>s)</h2>
+                        <span id="accelPosition" style="font-size: 13px; color: #667eea; font-weight: 600;">🔴 En direct</span>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="accelChart"></canvas>
+                    </div>
+                    <div class="controls">
+                        <button id="pauseAccelBtn" class="btn-secondary" onclick="togglePauseAccel()">⏸️ Pause</button>
+                        <button class="btn-secondary" onclick="resetZoomAccel()">🔍 Reset Zoom</button>
+                        <button id="extendAccelBtn" class="btn-secondary" onclick="toggleExtendAccel()">⏱️ 60s</button>
+                        <button class="btn-secondary" onclick="goToStart('accel')">⏮️ Début</button>
+                        <button class="btn-secondary" onclick="goToLive('accel')">🔴 Direct</button>
+                    </div>
+                    <div style="text-align: center; font-size: 12px; color: #6b7280; margin-top: 8px; padding: 8px; background: rgba(107, 114, 128, 0.1); border-radius: 8px;">
+                        🖱️ <strong>Glissez</strong> pour naviguer • <strong>Molette</strong> pour zoomer • Synchronisé avec ECG
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Variables globales
+        const socket = io();
+        
+        // Fonction pour formater un timestamp en HH:MM:SS
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            const seconds = date.getSeconds().toString().padStart(2, '0');
+            return `${hours}:${minutes}:${seconds}`;
+        }
+        
+        let signalChart;
+        let accelChart;
+        let signalData = [];
+        let accelData = { x: [], y: [], z: [] };
+        let maxSignalPoints = 300; // 30 secondes à 10Hz
+        let maxAccelPoints = 300; // 30 secondes à 10Hz
+        let isRecording = false;
+        let packetCount = 0;
+        let ecgPaused = false;
+        let accelPaused = false;
+        
+        // Gestion de la navigation historique et anomalies
+        let ecgHistoryOffset = 0;
+        let accelHistoryOffset = 0;
+        let currentAnomalyActive = false;  // Indique si une anomalie est en cours
+        let signalDataFull = [];  // Buffer complet pour l'historique
+        let accelDataFull = { x: [], y: [], z: [] };  // Buffer complet pour l'historique
+        
+        // NOUVEAU: Stats de session
+        let totalSamples = 0;
+        let sessionDuration = 0;
+        let sessionStartTime = null;
+        
+        // Initialisation du graphique ECG
+        function initChart() {
+            const ctx = document.getElementById('signalChart').getContext('2d');
+            signalChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Signal Cardiaque',
+                        data: [],
+                        borderColor: '#10b981',  // Vert par défaut, devient rouge en anomalie
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        fill: true,
+                        segment: {
+                            borderColor: ctx => {
+                                // Changer la couleur si anomalie
+                                const index = ctx.p0DataIndex;
+                                if (signalData[index] && signalData[index].isAnomaly) {
+                                    return '#ef4444';  // Rouge pour anomalie
+                                }
+                                return '#10b981';  // Vert normal
+                            }
+                        }
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Heure'
+                            },
+                            ticks: {
+                                maxTicksLimit: 8,
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Valeur ADC'
+                            },
+                            min: 3700,
+                            max: 3800,
+                            ticks: {
+                                stepSize: 10
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        zoom: {
+                            pan: {
+                                enabled: true,
+                                mode: 'xy',
+                                modifierKey: 'ctrl'
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                    speed: 0.1
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                drag: {
+                                    enabled: true,
+                                    backgroundColor: 'rgba(102, 126, 234, 0.3)',
+                                    borderColor: 'rgba(102, 126, 234, 0.8)',
+                                    borderWidth: 2
+                                },
+                                mode: 'xy'
+                            },
+                            limits: {
+                                y: {min: 0, max: 4000},
+                                x: {min: 0, max: 600}
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Initialisation du graphique Accéléromètre
+        function initAccelChart() {
+            const ctx = document.getElementById('accelChart').getContext('2d');
+            accelChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'X',
+                            data: [],
+                            borderColor: '#ef4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'Y',
+                            data: [],
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'Z',
+                            data: [],
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Heure'
+                            },
+                            ticks: {
+                                maxTicksLimit: 8,
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Accélération (g)'
+                            },
+                            min: -2,
+                            max: 2,
+                            ticks: {
+                                stepSize: 0.5
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        zoom: {
+                            pan: {
+                                enabled: true,
+                                mode: 'xy',
+                                modifierKey: 'ctrl'
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                    speed: 0.1
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                drag: {
+                                    enabled: true,
+                                    backgroundColor: 'rgba(102, 126, 234, 0.3)',
+                                    borderColor: 'rgba(102, 126, 234, 0.8)',
+                                    borderWidth: 2
+                                },
+                                mode: 'xy'
+                            },
+                            limits: {
+                                y: {min: -2, max: 2},
+                                x: {min: 0, max: 600}
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Mise à jour du graphique ECG
+        function updateChart(timestamp, value) {
+            console.log('📊 updateChart appelé - value:', value, 'paused:', ecgPaused);
+            
+            if (value === undefined || value === null) {
+                console.log('❌ Value undefined/null');
+                return;
+            }
+            
+            if (ecgPaused) {
+                console.log('⏸️  ECG en pause');
+                return;
+            }
+            
+            console.log('✅ Ajout au buffer:', value);
+            
+            // Ajouter au buffer complet (SANS LIMITE!)
+            signalDataFull.push({ 
+                time: timestamp, 
+                value: value,
+                isAnomaly: currentAnomalyActive 
+            });
+            
+            // Afficher les dernières données si en direct (offset = 0)
+            if (ecgHistoryOffset === 0) {
+                updateEcgDisplay();
+            }
+        }
+        
+        // Fonction pour mettre à jour l'affichage du graphe ECG
+        function updateEcgDisplay() {
+            const endIndex = signalDataFull.length - ecgHistoryOffset;
+            const startIndex = Math.max(0, endIndex - maxSignalPoints);
+            const displayData = signalDataFull.slice(startIndex, endIndex);
+            
+            signalData = displayData;
+            // Utiliser les timestamps réels formatés en HH:MM:SS
+            signalChart.data.labels = displayData.map(d => formatTime(d.time));
+            signalChart.data.datasets[0].data = displayData.map(d => d.value);
+            signalChart.update('none');
+            
+            // Mettre à jour l'indicateur de position
+            updatePositionIndicator('ecg');
+        }
+        
+        // Mise à jour du graphique Accéléromètre
+        function updateAccelChart(timestamp, x, y, z) {
+            if (accelPaused) return;
+            
+            // Ajouter au buffer complet (sans limite!)
+            accelDataFull.x.push({ time: timestamp, value: x, isAnomaly: currentAnomalyActive });
+            accelDataFull.y.push({ time: timestamp, value: y, isAnomaly: currentAnomalyActive });
+            accelDataFull.z.push({ time: timestamp, value: z, isAnomaly: currentAnomalyActive });
+            
+            // Afficher les dernières données si pas de navigation
+            if (accelHistoryOffset === 0) {
+                updateAccelDisplay();
+            }
+        }
+        
+        // Fonction pour mettre à jour l'affichage du graphe Accéléromètre
+        function updateAccelDisplay() {
+            const endIndex = accelDataFull.x.length - accelHistoryOffset;
+            const startIndex = Math.max(0, endIndex - maxAccelPoints);
+            const displayDataX = accelDataFull.x.slice(startIndex, endIndex);
+            const displayDataY = accelDataFull.y.slice(startIndex, endIndex);
+            const displayDataZ = accelDataFull.z.slice(startIndex, endIndex);
+            
+            accelData.x = displayDataX;
+            accelData.y = displayDataY;
+            accelData.z = displayDataZ;
+            
+            // Utiliser les timestamps réels formatés en HH:MM:SS
+            accelChart.data.labels = displayDataX.map(d => formatTime(d.time));
+            accelChart.data.datasets[0].data = displayDataX.map(d => d.value);
+            accelChart.data.datasets[1].data = displayDataY.map(d => d.value);
+            accelChart.data.datasets[2].data = displayDataZ.map(d => d.value);
+            accelChart.update('none');
+            
+            // Mettre à jour l'indicateur de position
+            updatePositionIndicator('accel');
+        }
+        
+        // NOUVEAU: Mettre à jour l'indicateur de position
+        function updatePositionIndicator(chartType) {
+            const isEcg = chartType === 'ecg';
+            const offset = isEcg ? ecgHistoryOffset : accelHistoryOffset;
+            const total = isEcg ? signalDataFull.length : accelDataFull.x.length;
+            const element = document.getElementById(isEcg ? 'ecgPosition' : 'accelPosition');
+            
+            if (offset === 0) {
+                element.textContent = '🔴 En direct';
+                element.style.color = '#667eea';
+            } else {
+                const secondsBack = Math.floor(offset / 10); // 10 Hz
+                const position = total - offset;
+                element.textContent = `📍 -${secondsBack}s (${position}/${total})`;
+                element.style.color = '#f59e0b';
+            }
+        }
+        
+        // NOUVEAU: Fonctions de navigation
+        function goToStart(chartType) {
+            if (chartType === 'ecg') {
+                ecgHistoryOffset = Math.max(0, signalDataFull.length - maxSignalPoints);
+                accelHistoryOffset = ecgHistoryOffset; // Synchroniser
+                updateEcgDisplay();
+                updateAccelDisplay();
+            } else {
+                accelHistoryOffset = Math.max(0, accelDataFull.x.length - maxAccelPoints);
+                ecgHistoryOffset = accelHistoryOffset; // Synchroniser
+                updateAccelDisplay();
+                updateEcgDisplay();
+            }
+        }
+        
+        function goToLive(chartType) {
+            ecgHistoryOffset = 0;
+            accelHistoryOffset = 0;
+            updateEcgDisplay();
+            updateAccelDisplay();
+        }
+        
+        // Mise à jour de l'accéléromètre
+        function updateAccel(x, y, z) {
+            // Valeurs textuelles
+            document.getElementById('accelXValue').textContent = `${x.toFixed(3)} g`;
+            document.getElementById('accelYValue').textContent = `${y.toFixed(3)} g`;
+            document.getElementById('accelZValue').textContent = `${z.toFixed(3)} g`;
+            
+            // Barres (0% à gauche = -2g, 50% = 0g, 100% à droite = +2g)
+            const xPercent = ((x + 2) / 4) * 100;
+            const yPercent = ((y + 2) / 4) * 100;
+            const zPercent = ((z + 2) / 4) * 100;
+            
+            document.getElementById('accelXBar').style.width = `${Math.min(100, Math.max(0, xPercent))}%`;
+            document.getElementById('accelYBar').style.width = `${Math.min(100, Math.max(0, yPercent))}%`;
+            document.getElementById('accelZBar').style.width = `${Math.min(100, Math.max(0, zPercent))}%`;
+        }
+        
+        // Mise à jour du BPM
+        function updateBPM(bpm) {
+            const bpmElement = document.getElementById('bpmValue');
+            if (bpm && bpm >= 40 && bpm <= 180) {
+                bpmElement.textContent = Math.round(bpm);
+            } else {
+                bpmElement.textContent = '--';
+            }
+        }
+        
+        // Socket.IO Events
+        socket.on('connect', () => {
+            console.log('✅ Connecté au serveur');
+            document.getElementById('connectionStatus').className = 'status-indicator connected';
+            document.getElementById('connectionStatus').querySelector('span').textContent = 'Connecté';
+        });
+        
+        socket.on('disconnect', () => {
+            console.log('❌ Déconnecté du serveur');
+            document.getElementById('connectionStatus').className = 'status-indicator disconnected';
+            document.getElementById('connectionStatus').querySelector('span').textContent = 'Déconnecté';
+        });
+        
+        socket.on('sensor_data', (data) => {
+            packetCount++;
+            document.getElementById('packetCount').textContent = packetCount;
+            
+            console.log('📦 Données reçues:', data);
+            console.log('   ECG:', data.ecg, 'BPM:', data.bpm);
+            console.log('   Accel:', data.accel);
+            console.log('   ECG paused:', ecgPaused, 'Accel paused:', accelPaused);
+            
+            // Mise à jour BPM
+            updateBPM(data.bpm);
+            
+            // Mise à jour ECG
+            if (data.ecg !== undefined && data.ecg !== null) {
+                console.log('✅ Mise à jour ECG:', data.ecg);
+                document.getElementById('ecgValue').textContent = data.ecg;
+                updateChart(data.timestamp, data.ecg);
+            } else {
+                console.log('❌ ECG ignoré (undefined/null)');
+            }
+            
+            // Mise à jour accéléromètre
+            if (data.accel) {
+                console.log('✅ Mise à jour Accel:', data.accel);
+                updateAccel(data.accel.x, data.accel.y, data.accel.z);
+                updateAccelChart(data.timestamp, data.accel.x, data.accel.y, data.accel.z);
+            } else {
+                console.log('❌ Accel ignoré');
+            }
+            
+            // Mise à jour dernier paquet
+            const time = new Date(data.timestamp);
+            document.getElementById('lastPacket').textContent = time.toLocaleTimeString();
+        });
+        
+        socket.on('history', (data) => {
+            console.log('📚 Historique reçu:', data);
+            
+            // Charger TOUT l'historique disponible
+            if (data.signal) {
+                signalDataFull = data.signal;  // Charger tout
+                updateEcgDisplay();  // Afficher les derniers
+            }
+            
+            if (data.accel) {
+                // Reconstruire les buffers d'accéléromètre
+                accelDataFull.x = [];
+                accelDataFull.y = [];
+                accelDataFull.z = [];
+                
+                data.accel.forEach(item => {
+                    accelDataFull.x.push({ time: item.time, value: item.x, isAnomaly: false });
+                    accelDataFull.y.push({ time: item.time, value: item.y, isAnomaly: false });
+                    accelDataFull.z.push({ time: item.time, value: item.z, isAnomaly: false });
+                });
+                
+                updateAccelDisplay();  // Afficher les derniers
+            }
+            
+            // Mettre à jour les stats
+            if (data.total_samples) {
+                totalSamples = data.total_samples;
+                document.getElementById('totalSamples').textContent = totalSamples.toLocaleString();
+            }
+            
+            if (data.session_start) {
+                sessionStartTime = new Date(data.session_start);
+            }
+        });
+        
+        // NOUVEAU: Recevoir les mises à jour de stats
+        socket.on('stats_update', (stats) => {
+            console.log('📊 Stats reçues:', stats);
+            
+            if (stats.total_samples) {
+                totalSamples = stats.total_samples;
+                document.getElementById('totalSamples').textContent = totalSamples.toLocaleString();
+            }
+            
+            if (stats.session_duration) {
+                sessionDuration = stats.session_duration;
+                const minutes = Math.floor(sessionDuration / 60);
+                const seconds = Math.floor(sessionDuration % 60);
+                document.getElementById('sessionDuration').textContent = `${minutes}m ${seconds}s`;
+            }
+        });
+        
+        socket.on('status', (stats) => {
+            document.getElementById('udpStatus').textContent = stats.udp_running ? '✅ Actif' : '❌ Inactif';
+        });
+        
+        socket.on('csv_status', (status) => {
+            isRecording = status.recording;
+            document.getElementById('startCsvBtn').disabled = isRecording;
+            document.getElementById('stopCsvBtn').disabled = !isRecording;
+            
+            if (isRecording) {
+                document.getElementById('recordingStatus').innerHTML = 
+                    '<div class="recording-indicator"><div class="recording-dot"></div>Enregistrement en cours</div>';
+                document.getElementById('csvFilename').textContent = `Fichier: ${status.filename || ''}`;
+            } else {
+                document.getElementById('recordingStatus').innerHTML = '';
+                document.getElementById('csvFilename').textContent = '';
+            }
+        });
+        
+        // Fonctions CSV
+        function startCSV() {
+            socket.emit('start_csv');
+        }
+        
+        function stopCSV() {
+            socket.emit('stop_csv');
+        }
+        
+        // Télécharger le fichier de données CSV
+        function downloadData() {
+            window.location.href = '/download/data';
+        }
+        
+        // Télécharger le fichier des anomalies CSV
+        function downloadAnomalies() {
+            window.location.href = '/download/anomalies';
+        }
+        
+        function clearChart() {
+            signalData = [];
+            signalChart.data.labels = [];
+            signalChart.data.datasets[0].data = [];
+            signalChart.update('none');
+        }
+        
+        function clearAccelChart() {
+            accelData = { x: [], y: [], z: [] };
+            accelChart.data.labels = [];
+            accelChart.data.datasets[0].data = [];
+            accelChart.data.datasets[1].data = [];
+            accelChart.data.datasets[2].data = [];
+            accelChart.update('none');
+        }
+        
+        // Fonction pause/resume ECG
+        function togglePauseEcg() {
+            ecgPaused = !ecgPaused;
+            const btn = event.target;
+            btn.textContent = ecgPaused ? '▶️ Resume' : '⏸️ Pause';
+            btn.style.backgroundColor = ecgPaused ? '#10b981' : '#f59e0b';
+        }
+        
+        // Fonction pause/resume Accéléromètre
+        function togglePauseAccel() {
+            accelPaused = !accelPaused;
+            const btn = event.target;
+            btn.textContent = accelPaused ? '▶️ Resume' : '⏸️ Pause';
+            btn.style.backgroundColor = accelPaused ? '#10b981' : '#f59e0b';
+        }
+        
+        // Fonction reset zoom ECG
+        function resetZoomEcg() {
+            if (signalChart) {
+                signalChart.resetZoom();
+            }
+        }
+        
+        // Fonction reset zoom Accéléromètre
+        function resetZoomAccel() {
+            if (accelChart) {
+                accelChart.resetZoom();
+            }
+        }
+        
+        // Fonction extend time range ECG
+        function toggleExtendEcg() {
+            const timeRanges = [300, 600, 900, 1200]; // 30s, 60s, 90s, 120s
+            const currentIndex = timeRanges.indexOf(maxSignalPoints);
+            const nextIndex = (currentIndex + 1) % timeRanges.length;
+            maxSignalPoints = timeRanges[nextIndex];
+            
+            const seconds = maxSignalPoints / 10;
+            document.getElementById('ecgTimeRange').textContent = `${seconds}s`;
+            
+            const btn = event.target;
+            const nextSeconds = timeRanges[(nextIndex + 1) % timeRanges.length] / 10;
+            btn.textContent = `⏱️ ${nextSeconds}s`;
+            
+            // Mettre à jour l'affichage
+            updateEcgDisplay();
+        }
+        
+        // Fonction extend time range Accéléromètre
+        function toggleExtendAccel() {
+            const timeRanges = [300, 600, 900, 1200]; // 30s, 60s, 90s, 120s
+            const currentIndex = timeRanges.indexOf(maxAccelPoints);
+            const nextIndex = (currentIndex + 1) % timeRanges.length;
+            maxAccelPoints = timeRanges[nextIndex];
+            
+            const seconds = maxAccelPoints / 10;
+            document.getElementById('accelTimeRange').textContent = `${seconds}s`;
+            
+            const btn = event.target;
+            const nextSeconds = timeRanges[(nextIndex + 1) % timeRanges.length] / 10;
+            btn.textContent = `⏱️ ${nextSeconds}s`;
+            
+            // Mettre à jour l'affichage
+            updateAccelDisplay();
+        }
+        
+        // ========== NAVIGATION HISTORIQUE PAR DRAG ==========
+        
+        let isDraggingEcg = false;
+        let isDraggingAccel = false;
+        let dragStartX = 0;
+        let dragStartOffset = 0;
+        
+        // Initialiser le drag sur les graphiques
+        function initDragNavigation() {
+            const ecgCanvas = document.getElementById('signalChart');
+            const accelCanvas = document.getElementById('accelChart');
+            const ecgContainer = ecgCanvas.parentElement;
+            const accelContainer = accelCanvas.parentElement;
+            
+            // ECG Chart
+            ecgCanvas.addEventListener('mousedown', (e) => {
+                isDraggingEcg = true;
+                dragStartX = e.clientX;
+                dragStartOffset = ecgHistoryOffset;
+                ecgContainer.classList.add('dragging');
+            });
+            
+            ecgCanvas.addEventListener('mousemove', (e) => {
+                if (!isDraggingEcg) return;
+                
+                const deltaX = e.clientX - dragStartX;
+                // 1 pixel = ~0.5 échantillon (ajustable)
+                const offset = Math.floor(deltaX * 0.5);
+                
+                ecgHistoryOffset = dragStartOffset - offset;
+                
+                // Limites
+                const maxOffset = signalDataFull.length - maxSignalPoints;
+                ecgHistoryOffset = Math.max(0, Math.min(ecgHistoryOffset, maxOffset));
+                
+                updateEcgDisplay();
+                
+                // SYNCHRONISER l'accéléromètre
+                accelHistoryOffset = ecgHistoryOffset;
+                updateAccelDisplay();
+            });
+            
+            ecgCanvas.addEventListener('mouseup', () => {
+                isDraggingEcg = false;
+                ecgContainer.classList.remove('dragging');
+            });
+            
+            ecgCanvas.addEventListener('mouseleave', () => {
+                isDraggingEcg = false;
+                ecgContainer.classList.remove('dragging');
+            });
+            
+            // Accel Chart
+            accelCanvas.addEventListener('mousedown', (e) => {
+                isDraggingAccel = true;
+                dragStartX = e.clientX;
+                dragStartOffset = accelHistoryOffset;
+                accelContainer.classList.add('dragging');
+            });
+            
+            accelCanvas.addEventListener('mousemove', (e) => {
+                if (!isDraggingAccel) return;
+                
+                const deltaX = e.clientX - dragStartX;
+                const offset = Math.floor(deltaX * 0.5);
+                
+                accelHistoryOffset = dragStartOffset - offset;
+                
+                // Limites
+                const maxOffset = accelDataFull.x.length - maxAccelPoints;
+                accelHistoryOffset = Math.max(0, Math.min(accelHistoryOffset, maxOffset));
+                
+                updateAccelDisplay();
+                
+                // SYNCHRONISER l'ECG
+                ecgHistoryOffset = accelHistoryOffset;
+                updateEcgDisplay();
+            });
+            
+            accelCanvas.addEventListener('mouseup', () => {
+                isDraggingAccel = false;
+                accelContainer.classList.remove('dragging');
+            });
+            
+            accelCanvas.addEventListener('mouseleave', () => {
+                isDraggingAccel = false;
+                accelContainer.classList.remove('dragging');
+            });
+        }
+        
+        // Gérer le curseur avec la touche Ctrl
+        let isCtrlPressed = false;
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Control' && !isCtrlPressed) {
+                isCtrlPressed = true;
+                document.querySelectorAll('.chart-container').forEach(container => {
+                    container.classList.add('ctrl-pressed');
+                });
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'Control') {
+                isCtrlPressed = false;
+                document.querySelectorAll('.chart-container').forEach(container => {
+                    container.classList.remove('ctrl-pressed');
+                });
+            }
+        });
+        
+        // Réinitialiser le curseur si la fenêtre perd le focus
+        window.addEventListener('blur', () => {
+            isCtrlPressed = false;
+            document.querySelectorAll('.chart-container').forEach(container => {
+                container.classList.remove('ctrl-pressed');
+            });
+        });
+        
+        // ========== GESTION DES ANOMALIES ==========
+        
+        // Recevoir une alerte d'anomalie (sans son - géré par ESP32)
+        socket.on('anomaly_alert', (data) => {
+            console.log('🚨 Alerte anomalie reçue:', data);
+            currentAnomalyActive = true;  // Marquer le début de l'anomalie
+            displayAnomalyAlert(data);
+        });
+        
+        // Recevoir la fin d'une anomalie
+        socket.on('anomaly_end', (data) => {
+            console.log('✅ Fin anomalie:', data);
+            currentAnomalyActive = false;  // Marquer la fin de l'anomalie
+            hideAnomalyAlert();
+            // Rafraîchir automatiquement la liste
+            refreshAnomalies();
+        });
+        
+        // Recevoir l'historique des anomalies
+        socket.on('anomalies_history', (data) => {
+            console.log('📋 Historique anomalies:', data);
+            displayAnomaliesHistory(data.anomalies);
+        });
+        
+        // Confirmation d'effacement
+        socket.on('anomalies_cleared', (data) => {
+            if (data.success) {
+                console.log('🗑️ Anomalies effacées avec succès');
+                document.getElementById('anomaliesList').innerHTML = 
+                    '<div style="text-align:center; padding: 20px; color: #6b7280;">Aucune anomalie enregistrée</div>';
+                document.getElementById('anomaliesCount').textContent = '0';
+            } else {
+                console.error('❌ Erreur effacement:', data.error);
+                alert('Erreur lors de l\'effacement des anomalies');
+            }
+        });
+        
+        // Afficher l'alerte d'anomalie dans la boîte (sans son)
+        function displayAnomalyAlert(data) {
+            const alertBox = document.getElementById('anomalyAlert');
+            const typeEl = document.getElementById('anomalyType');
+            const detailsEl = document.getElementById('anomalyDetails');
+            const severityEl = document.getElementById('anomalySeverity');
+            
+            // Mapping des icônes selon le niveau d'urgence
+            const urgencyIcons = {
+                'URGENCE_MAXIMALE': '🚨',
+                'URGENCE_MEDICALE': '👨‍⚕️',
+                'SURVEILLANCE_ACTIVE': '👁️',
+                'ALERTE_MEDICALE': '❤️‍🩹',
+                'ALERTE_CRITIQUE': '🚨',
+                'ASSISTANCE_SUGGEREE': '🤝',
+                'INFORMATION': 'ℹ️',
+                'SURVEILLANCE': '📊',
+                'MONITORING': '✅'
+            };
+            
+            const niveauUrgence = data.niveau_urgence || 'ALERTE';
+            const icon = urgencyIcons[niveauUrgence] || '⚠️';
+            
+            // Couleur selon sévérité
+            let bgColor = 'linear-gradient(135deg, #f59e0b, #d97706)'; // Modéré (orange)
+            
+            if (data.severity === 'critique') {
+                bgColor = 'linear-gradient(135deg, #7f1d1d, #450a0a)'; // Rouge très foncé
+            } else if (data.severity === 'grave') {
+                bgColor = 'linear-gradient(135deg, #dc2626, #991b1b)'; // Rouge
+            }
+            
+            // Changer la couleur de fond de l'alerte
+            alertBox.style.background = bgColor;
+            
+            // Titre avec icône et niveau d'urgence
+            typeEl.innerHTML = `
+                <div style="font-size: 24px; margin-bottom: 5px;">${icon}</div>
+                <div style="font-size: 16px; font-weight: bold;">${niveauUrgence.replace(/_/g, ' ')}</div>
+                <div style="font-size: 13px; opacity: 0.9; margin-top: 3px;">${data.type.replace(/_/g, ' ')}</div>
+            `;
+            
+            // Message d'alerte
+            let details = `<div style="margin: 10px 0; font-size: 14px; line-height: 1.6;">${data.message || ''}</div>`;
+            
+            // Détails supplémentaires
+            details += '<div style="font-size: 12px; margin-top: 8px;">';
+            
+            if (data.bpm && data.bpm_valid) {
+                details += `<div>💓 BPM: ${data.bpm.toFixed(0)} bpm</div>`;
+            }
+            
+            if (data.accel_max) {
+                details += `<div>📊 Accel max: ${data.accel_max.toFixed(2)}g</div>`;
+            }
+            
+            if (data.signal_quality !== undefined) {
+                const qualityPercent = (data.signal_quality * 100).toFixed(0);
+                details += `<div>📶 Qualité signal: ${qualityPercent}%</div>`;
+            }
+            
+            if (data.delai_intervention !== null && data.delai_intervention !== undefined) {
+                if (data.delai_intervention === 0) {
+                    details += `<div style="color: #fbbf24; font-weight: bold;">⏱️ Intervention IMMÉDIATE requise</div>`;
+                } else {
+                    details += `<div>⏱️ Délai intervention: ${data.delai_intervention}s</div>`;
+                }
+            }
+            
+            details += '</div>';
+            detailsEl.innerHTML = details;
+            
+            // Badge de sévérité
+            severityEl.textContent = data.severity.toUpperCase();
+            severityEl.className = `severity-badge severity-${data.severity}`;
+            
+            // Afficher la boîte avec animation
+            alertBox.classList.add('show');
+            
+            // Animation spéciale pour alertes critiques
+            if (data.severity === 'critique' || niveauUrgence.includes('URGENCE')) {
+                alertBox.classList.add('critical');
+            } else {
+                alertBox.classList.remove('critical');
+            }
+        }
+        
+        // Masquer l'alerte
+        function hideAnomalyAlert() {
+            const alertBox = document.getElementById('anomalyAlert');
+            alertBox.classList.remove('show');
+        }
+        
+        // Afficher l'historique des anomalies
+        function displayAnomaliesHistory(anomalies) {
+            const listContainer = document.getElementById('anomaliesList');
+            
+            if (!anomalies || anomalies.length === 0) {
+                listContainer.innerHTML = 
+                    '<div style="text-align:center; padding: 20px; color: #6b7280;">Aucune anomalie enregistrée</div>';
+                updateAnomalyCounts([], 'all');
+                return;
+            }
+            
+            // Stocker globalement pour le filtrage
+            window.allAnomalies = anomalies;
+            
+            // Afficher selon l'onglet actif
+            const activeTab = document.querySelector('.tab-btn.active').id.replace('tab-', '');
+            showGravityTab(activeTab);
+        }
+        
+        // Variable globale pour stocker toutes les anomalies
+        let currentGravityFilter = 'all';
+        
+        // Fonction pour afficher un onglet de gravité
+        function showGravityTab(gravity) {
+            currentGravityFilter = gravity;
+            
+            // Mettre à jour les onglets actifs
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('tab-' + gravity).classList.add('active');
+            
+            if (!window.allAnomalies) return;
+            
+            // Filtrer les anomalies selon la gravité
+            let filteredAnomalies = window.allAnomalies;
+            if (gravity !== 'all') {
+                filteredAnomalies = window.allAnomalies.filter(a => (a.severity || 'modéré') === gravity);
+            }
+            
+            // Trier par date (plus récent en premier)
+            filteredAnomalies.sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
+            
+            // Mettre à jour les compteurs
+            updateAnomalyCounts(window.allAnomalies, gravity);
+            
+            // Afficher les anomalies filtrées
+            renderAnomaliesList(filteredAnomalies);
+        }
+        
+        // Mettre à jour les compteurs de chaque onglet
+        function updateAnomalyCounts(anomalies, activeGravity) {
+            const counts = {
+                all: anomalies.length,
+                critique: anomalies.filter(a => a.severity === 'critique').length,
+                grave: anomalies.filter(a => a.severity === 'grave').length,
+                'modéré': anomalies.filter(a => a.severity === 'modéré').length
+            };
+            
+            document.getElementById('count-all').textContent = counts.all;
+            document.getElementById('count-critique').textContent = counts.critique;
+            document.getElementById('count-grave').textContent = counts.grave;
+            document.getElementById('count-modéré').textContent = counts['modéré'];
+        }
+        
+        // Afficher la liste des anomalies
+        function renderAnomaliesList(anomalies) {
+            const listContainer = document.getElementById('anomaliesList');
+            
+            if (anomalies.length === 0) {
+                listContainer.innerHTML = 
+                    '<div style="text-align:center; padding: 20px; color: #6b7280;">Aucune anomalie dans cette catégorie</div>';
+                return;
+            }
+            
+            let html = '';
+            anomalies.forEach(anomaly => {
+                const startTime = new Date(anomaly.start_time);
+                const timeStr = startTime.toLocaleString('fr-FR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+                
+                const duration = parseFloat(anomaly.duration_seconds);
+                const durationStr = duration >= 60 
+                    ? `${Math.floor(duration / 60)}m ${Math.floor(duration % 60)}s`
+                    : `${duration.toFixed(1)}s`;
+                
+                const type = anomaly.anomaly_type.replace(/_/g, ' ').replace(/\+/g, ' + ');
+                const severity = anomaly.severity || 'modéré';
+                
+                // Icônes selon type et sévérité
+                let severityIcon = '⚠️';
+                if (type.includes('chute_critique') || type.includes('convulsion')) {
+                    severityIcon = '🚨';
+                } else if (type.includes('chute') || type.includes('difficulté')) {
+                    severityIcon = '🤕';
+                } else if (severity === 'critique') {
+                    severityIcon = '🚨';
+                } else if (severity === 'grave') {
+                    severityIcon = '⛔';
+                } else {
+                    severityIcon = '⚠️';
+                }
+                
+                let details = '';
+                if (anomaly.bpm_min || anomaly.bpm_max) {
+                    details += `<div><strong>BPM:</strong> `;
+                    if (anomaly.bpm_min) details += `Min: ${anomaly.bpm_min} `;
+                    if (anomaly.bpm_max) details += `Max: ${anomaly.bpm_max} `;
+                    if (anomaly.bpm_avg) details += `Moy: ${anomaly.bpm_avg}`;
+                    details += `</div>`;
+                }
+                
+                if (anomaly.accel_x_max || anomaly.accel_y_max || anomaly.accel_z_max) {
+                    details += `<div><strong>Accel max:</strong> `;
+                    if (anomaly.accel_x_max) details += `X: ${anomaly.accel_x_max}g `;
+                    if (anomaly.accel_y_max) details += `Y: ${anomaly.accel_y_max}g `;
+                    if (anomaly.accel_z_max) details += `Z: ${anomaly.accel_z_max}g`;
+                    details += `</div>`;
+                }
+                
+                // Générer l'ID de l'anomalie au format YYYYMMDD_HHMMSS
+                const anomalyId = startTime.toISOString()
+                    .replace(/[-:]/g, '')
+                    .replace('T', '_')
+                    .substring(0, 15);
+                
+                html += `
+                    <div class="anomaly-item ${severity}">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <div style="font-weight: 600; font-size: 14px;">
+                                <span style="font-size: 18px; margin-right: 5px;">${severityIcon}</span>
+                                ${type}
+                            </div>
+                            <span class="severity-badge severity-${severity}">${severity.toUpperCase()}</span>
+                        </div>
+                        <div style="font-size: 12px; color: #6b7280; margin-bottom: 6px;">
+                            📅 ${timeStr} | ⏱️ Durée: ${durationStr}
+                        </div>
+                        ${details}
+                        ${anomaly.description ? `<div style="font-size: 12px; color: #4b5563; margin-top: 6px; font-style: italic;">${anomaly.description}</div>` : ''}
+                        <div style="margin-top: 10px;">
+                            <button class="btn-view-anomaly" onclick="viewAnomalyGraph('${anomalyId}')">
+                                📊 Visualiser
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            listContainer.innerHTML = html;
+        }
+        
+        // Rafraîchir la liste des anomalies
+        function refreshAnomalies() {
+            console.log('🔄 Rafraîchissement de la liste des anomalies');
+            socket.emit('get_anomalies');
+        }
+        
+        // Effacer les anomalies (avec confirmation)
+        function clearAnomalies() {
+            const confirmed = confirm('⚠️ Êtes-vous sûr de vouloir effacer toutes les anomalies?\n\nUn fichier de backup sera créé.');
+            if (confirmed) {
+                console.log('🗑️ Effacement des anomalies demandé');
+                socket.emit('clear_anomalies');
+            }
+        }
+        
+        // ========== VISUALISATION DES ANOMALIES ==========
+        
+        let modalEcgChart = null;
+        let modalAccelChart = null;
+        
+        // Ouvrir la modal de visualisation d'une anomalie
+        async function viewAnomalyGraph(anomalyId) {
+            console.log('📊 Ouverture de la visualisation pour:', anomalyId);
+            
+            try {
+                const response = await fetch(`/api/anomaly/${anomalyId}`);
+                if (!response.ok) {
+                    alert('❌ Impossible de charger les données de l\'anomalie');
+                    return;
+                }
+                
+                const anomalyData = await response.json();
+                console.log('✅ Données reçues:', anomalyData);
+                
+                // Afficher la modal
+                document.getElementById('anomalyModal').classList.add('active');
+                
+                // Afficher les informations
+                const infoDiv = document.getElementById('anomalyModalInfo');
+                const startTime = new Date(anomalyData.start_time);
+                const endTime = new Date(anomalyData.end_time);
+                const timeStr = startTime.toLocaleString('fr-FR');
+                
+                infoDiv.innerHTML = `
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div><strong>Type:</strong> ${anomalyData.type.replace(/_/g, ' ').replace(/\+/g, ' + ')}</div>
+                        <div><strong>Sévérité:</strong> <span class="severity-badge severity-${anomalyData.severity}">${anomalyData.severity.toUpperCase()}</span></div>
+                        <div><strong>Début:</strong> ${timeStr}</div>
+                        <div><strong>Durée:</strong> ${anomalyData.duration.toFixed(1)}s</div>
+                    </div>
+                `;
+                
+                // Préparer les données pour les graphiques
+                const data = anomalyData.data || [];
+                const timestamps = data.map(d => new Date(d.timestamp));
+                const ecgValues = data.map(d => d.ecg || null);
+                const bpmValues = data.map(d => d.bpm || null);
+                const accelX = data.map(d => d.accel_x);
+                const accelY = data.map(d => d.accel_y);
+                const accelZ = data.map(d => d.accel_z);
+                
+                // Créer le graphique ECG
+                createModalEcgChart(timestamps, ecgValues, bpmValues);
+                
+                // Créer le graphique accéléromètre
+                createModalAccelChart(timestamps, accelX, accelY, accelZ);
+                
+            } catch (error) {
+                console.error('❌ Erreur chargement anomalie:', error);
+                alert('Erreur lors du chargement de l\'anomalie');
+            }
+        }
+        
+        // Créer le graphique ECG dans la modal
+        function createModalEcgChart(timestamps, ecgValues, bpmValues) {
+            const ctx = document.getElementById('modalEcgChart');
+            
+            // Détruire le graphique existant
+            if (modalEcgChart) {
+                modalEcgChart.destroy();
+            }
+            
+            // Formater les labels de temps
+            const labels = timestamps.map(t => {
+                const date = new Date(t);
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                const seconds = String(date.getSeconds()).padStart(2, '0');
+                const ms = String(date.getMilliseconds()).padStart(3, '0');
+                return `${hours}:${minutes}:${seconds}.${ms}`;
+            });
+            
+            modalEcgChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Signal ECG',
+                        data: ecgValues,
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.1,
+                        pointRadius: 2,
+                        pointHoverRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2.5,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: function(context) {
+                                    const bpm = bpmValues[context.dataIndex];
+                                    return bpm ? `BPM: ${bpm.toFixed(0)}` : '';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Temps'
+                            },
+                            ticks: {
+                                maxTicksLimit: 10,
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Signal ECG'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Créer le graphique accéléromètre dans la modal
+        function createModalAccelChart(timestamps, accelX, accelY, accelZ) {
+            const ctx = document.getElementById('modalAccelChart');
+            
+            // Détruire le graphique existant
+            if (modalAccelChart) {
+                modalAccelChart.destroy();
+            }
+            
+            // Formater les labels de temps
+            const labels = timestamps.map(t => {
+                const date = new Date(t);
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                const seconds = String(date.getSeconds()).padStart(2, '0');
+                const ms = String(date.getMilliseconds()).padStart(3, '0');
+                return `${hours}:${minutes}:${seconds}.${ms}`;
+            });
+            
+            modalAccelChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Accel X',
+                            data: accelX,
+                            borderColor: '#ef4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            pointRadius: 2
+                        },
+                        {
+                            label: 'Accel Y',
+                            data: accelY,
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            pointRadius: 2
+                        },
+                        {
+                            label: 'Accel Z',
+                            data: accelZ,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            pointRadius: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2.5,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Temps'
+                            },
+                            ticks: {
+                                maxTicksLimit: 10,
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Accélération (g)'
+                            },
+                            min: -2,
+                            max: 2
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Fermer la modal
+        function closeAnomalyModal(event) {
+            // Si event est fourni et que ce n'est pas un clic sur l'overlay, ignorer
+            if (event && event.target !== event.currentTarget) {
+                return;
+            }
+            
+            document.getElementById('anomalyModal').classList.remove('active');
+            
+            // Détruire les graphiques pour libérer la mémoire
+            if (modalEcgChart) {
+                modalEcgChart.destroy();
+                modalEcgChart = null;
+            }
+            if (modalAccelChart) {
+                modalAccelChart.destroy();
+                modalAccelChart = null;
+            }
+        }
+        
+        // ========== INITIALISATION ==========
+        
+        window.onload = () => {
+            initChart();
+            initAccelChart();
+            socket.emit('get_status');
+            // Charger l'historique des anomalies au démarrage
+            refreshAnomalies();
+            // Initialiser la navigation par drag
+            initDragNavigation();
+        };
+    </script>
+</body>
+</html>

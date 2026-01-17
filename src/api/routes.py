@@ -2,12 +2,17 @@ from flask import Blueprint, request, jsonify, Response
 import os
 import json
 import sqlite3
+import sys
 from datetime import datetime
 
-from src.utils import validate_sensor_data, process_sensor_data
-from src.api import realtime  # publish events to SSE clients
+# Assurer que le package src est dans le chemin pour les imports
+if __name__ == '__main__':
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-api_bp = Blueprint('api', __name__, url_prefix='/api')
+from src.utils import validate_sensor_data, process_sensor_data
+from src.api import realtime  # publier les événements aux clients SSE
+
+api_bp = Blueprint('api', __name__)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DB_FILENAME = os.path.join(PROJECT_ROOT, 'esp32_data.db')
@@ -23,6 +28,9 @@ def init_db():
         x REAL,
         y REAL,
         z REAL,
+        bpm REAL,
+        ir INTEGER,
+        ecg INTEGER,
         raw TEXT
     );
     """)
@@ -31,19 +39,21 @@ def init_db():
 
 init_db()
 
-def _store_row(id_, type_, timestamp, x, y, z, raw):
+def _store_row(id_, type_, timestamp, x, y, z, raw, bpm=None, ir=None, ecg=None):
     conn = sqlite3.connect(DB_FILENAME)
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO sensor_data (id, type, timestamp, x, y, z, raw)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (id_, type_, timestamp, x, y, z, json.dumps(raw)))
+        INSERT INTO sensor_data (id, type, timestamp, x, y, z, bpm, ir, ecg, raw)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (id_, type_, timestamp, x, y, z, bpm, ir, ecg, json.dumps(raw)))
+    lastrowid = cur.lastrowid
     conn.commit()
     conn.close()
+    return lastrowid
 
 @api_bp.route('/sensor-data', methods=['POST'])
 def receive_sensor_data():
-    # lecture flexible du payload
+    # Lecture flexible de la charge utile
     data = request.get_json(silent=True)
     if data is None:
         if request.form:
@@ -58,16 +68,16 @@ def receive_sensor_data():
             except Exception:
                 data = None
 
-    # log reçu pour debug
+    # Log reçu pour débogage
     client = request.remote_addr
-    print(f"[{datetime.utcnow().isoformat()}] Requete POST de {client} -> endpoint {request.path}")
-    print("Raw data:", request.get_data(as_text=True))
-    print("Parsed JSON:", data)
+    print(f"[{datetime.utcnow().isoformat()}] Requête POST de {client} -> endpoint {request.path}")
+    print("Données brutes:", request.get_data(as_text=True))
+    print("JSON analysé:", data)
 
     if data is None:
-        return jsonify({'status': 'error', 'message': 'No JSON payload or unreadable body'}), 400
+        return jsonify({'status': 'error', 'message': 'Pas de charge JSON ou corps illisible'}), 400
 
-    # validation simple
+    # Validation simple
     try:
         validate_sensor_data(data)
     except ValueError as e:
@@ -77,13 +87,17 @@ def receive_sensor_data():
     timestamp = data.get('timestamp') or datetime.utcnow().isoformat() + 'Z'
 
     try:
+        bpm = processed.get('bpm')
+        ir = processed.get('ir')
+        ecg = processed.get('ecg')
         _store_row(processed['id'], processed['type'], timestamp,
-                   processed['x'], processed['y'], processed['z'], data)
+                   processed['x'], processed['y'], processed['z'], data,
+                   bpm=bpm, ir=ir, ecg=ecg)
     except Exception as e:
         print("Error storing to DB:", e)
         return jsonify({'status': 'error', 'message': 'DB error'}), 500
 
-    # publish to SSE clients (real-time)
+    # Publier aux clients SSE (temps réel)
     try:
         event_payload = {
             "id": processed['id'],
@@ -92,13 +106,16 @@ def receive_sensor_data():
             "x": processed['x'],
             "y": processed['y'],
             "z": processed['z'],
+            "bpm": processed.get('bpm'),
+            "ir": processed.get('ir'),
+            "ecg": processed.get('ecg'),
             "raw": data
         }
         realtime.publish(event_payload)
     except Exception as e:
-        print("Error publishing realtime event:", e)
+        print("Erreur lors de la publication de l'événement temps réel:", e)
 
-    # retourne le contenu traité pour vérification client
+    # Retourner le contenu traité pour vérification du client
     return jsonify({'status': 'received', 'timestamp': timestamp, 'data': processed}), 200
 
 @api_bp.route('/sensor-data/latest', methods=['GET'])
@@ -106,12 +123,12 @@ def latest():
     try:
         conn = sqlite3.connect(DB_FILENAME)
         cur = conn.cursor()
-        cur.execute("SELECT id,type,timestamp,x,y,z,raw FROM sensor_data ORDER BY rowid DESC LIMIT 1;")
+        cur.execute("SELECT id,type,timestamp,x,y,z,bpm,ir,ecg,raw FROM sensor_data ORDER BY rowid DESC LIMIT 1;")
         row = cur.fetchone()
         conn.close()
         if not row:
             return jsonify({'status':'empty'}), 200
-        id_, type_, timestamp, x, y, z, raw = row
+        id_, type_, timestamp, x, y, z, bpm, ir, ecg, raw = row
         return jsonify({
             'status': 'ok',
             'data': {
@@ -119,6 +136,7 @@ def latest():
                 'type': type_,
                 'timestamp': timestamp,
                 'x': x, 'y': y, 'z': z,
+                'bpm': bpm, 'ir': ir, 'ecg': ecg,
                 'raw': json.loads(raw)
             }
         }), 200
@@ -128,6 +146,6 @@ def latest():
 @api_bp.route('/stream', methods=['GET'])
 def stream_events():
     """
-    SSE endpoint. Clients connect to /api/stream to receive real-time measurements.
+    Endpoint SSE. Les clients se connectent à /stream pour recevoir les mesures en temps réel.
     """
     return Response(realtime.stream(), mimetype='text/event-stream')
